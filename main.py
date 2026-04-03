@@ -31,9 +31,9 @@ def put_livros(id: int, Livro: Livro):
     if not meu_livros:
         raise HTTPException(status_code=404, detail="Livro não encontrado.")
     else:
-        meu_livros[id] = Livro.dict()
+      meu_dicionario[id] = Livro.dict()
         
-        return {"message": "Livro atualizado com sucesso."}
+    return {"message": "Livro atualizado com sucesso."}
 
 @app.delete("/deletar/{id}")
 def delete_livros(id: int):
