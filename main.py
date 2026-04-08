@@ -27,12 +27,31 @@ def autenticar_meu_usuario(credentials: HTTPBasicCredentials = Depends(security)
         raise HTTPException(status_code=401, detail="Credenciais inválidas.", headers={"WWW-Authenticate": "Basic"})
 
 @app.get("/livros")
-def get_livros(credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)):
+def get_livros(page: int = 1, limit: int = 10,credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)):
+    if page < 1 or limit < 1:
+        raise HTTPException(status_code=400, detail="Page e limit devem ser maiores que 0.")
     if not meu_dicionario:
-        return {"message": "Nenhum livro encontrado."}
-    else:
-        return{"livros": meu_dicionario}
+       return {"message": "Nenhum livro encontrado."}
+    start = (page - 1) * limit
+    end = start + limit
 
+    livros_paginados=[
+        {
+            "id": id,
+            "titulo": livro_data["titulo"],
+            "autor": livro_data["autor"],
+            "ano": livro_data["ano"]
+        }
+        for id, livro_data in list(meu_dicionario.items())[start:end]
+    ]
+    for id, livro_data in list(meu_dicionario.items())[start:end]:
+
+        return {
+            "page": page,
+            "limit": limit,
+            "total_livros": len(meu_dicionario),
+            "livros": livros_paginados
+        }
 @app.post("/adicionar")
 def post_livros(id: int, Livro: Livro, credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)):
     if id in meu_dicionario:
