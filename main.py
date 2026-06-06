@@ -9,16 +9,20 @@ from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
-database_url = "sqlite:///./livros.db"
+database_url = os.getenv("database_url")
 
-engime = create_engine(database_url, connect_args= ({"check_same_thread": False}))
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engime)
+engine = create_engine(database_url, connect_args= ({"check_same_thread": False}))
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine
+)
 base = declarative_base()
 
 app = FastAPI()
 #criando um login para o minha api 
-meu_usuario = "admin"
-meu_senha = "admin123"
+meu_usuario = os.getenv("meu_usuario")
+meu_senha = os.getenv("meu_senha")
 
 security = HTTPBasic()
 
@@ -36,7 +40,7 @@ class Livro(BaseModel):
     autor_livro: str
     ano_livro: int
 
-base.metadata.create_all(bind=engime)
+base.metadata.create_all(bind=engine)
 
 def sessao_db():
     db = SessionLocal()
