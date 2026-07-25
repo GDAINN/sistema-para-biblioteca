@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import Optional
 import secrets
 import os 
+import redis
+import json
 
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import declarative_base
@@ -17,6 +19,7 @@ SessionLocal = sessionmaker(
     autoflush=False,
     bind=engine
 )
+redis_client = redis.Redis(host="localhost", port=6379, db = 0, decode_responses=True )
 base = declarative_base()
 
 app = FastAPI()
@@ -39,6 +42,11 @@ class Livro(BaseModel):
     nome_livro: str
     autor_livro: str
     ano_livro: int
+def salvar_livro_redis(livro_id: id, livro:Livro):
+    redis_client.set(f"Livro:{livro_id}",json.dumps(livro.dict()))
+
+def deletar_livro_redis(livro_id: int):
+    redis_client.delete(f"Livro:{livro_id}")
 
 base.metadata.create_all(bind=engine)
 
@@ -109,7 +117,7 @@ def post_livros(
     db.add(novo_livro)
     db.commit()
     db.refresh(novo_livro)
-
+    salvar_livro_redis(novo_livro.id, livro)
     return {"message": "Livro adicionado com sucesso."}
 
 
@@ -138,5 +146,5 @@ def delete_livros(id: int, db: Session = Depends(sessao_db), credentials: HTTPBa
     
     db.delete(db_livro)
     db.commit()
-
+    deletar_livro_redis(id)
     return {"message": "Livro deletado com sucesso."}
