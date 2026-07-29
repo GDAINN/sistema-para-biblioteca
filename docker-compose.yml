@@ -10,19 +10,42 @@ services:
       - .:/app
     env_file:
       - .env
-    command: ["poetry", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      - redis
+    command:
+      [
+        "poetry",
+        "run",
+        "uvicorn",
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+      ]
 
-redis:
-  image: redis:7-alpine 
-  container_name: livros-redis
-  ports:
-  - "6479:6379"
+  redis:
+    image: redis:7-alpine
+    container_name: livros-redis
+    ports:
+      - "6379:6379"
 
-celery:
-nuild:
-container_name: livros-celery
-command: ["poetry ","run","celery", "-A", "celery_app:celery:app", "worker", "-Q", "livros", "--loglevel=info "]
-volumes:
-  - .:/app
-depends_on:
-  - redis
+  celery:
+    build: .
+    container_name: livros-celery
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    command:
+      [
+        "poetry",
+        "run",
+        "celery",
+        "-A",
+        "celery_app:Celery_app",
+        "worker",
+        "--loglevel=info",
+      ]

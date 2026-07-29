@@ -12,6 +12,6 @@ def fatorial(self, n):
         raise ValueError("Número negativo, não é permitido")
     resultado = 1 
     for i in range( 2, n +1 ):
-        resultado *= 1 
+        resultado *= i
     return resultado 
     

@@ -1,15 +1,22 @@
 from celery import Celery
+import os
 
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = os.getenv("REDIS_PORT","6379")
+REDIS_URL = os.getenv("REDIS_URL", f"redis://{REDIS_HOST}: {REDIS_PORT}/0") 
 Celery_app = Celery(
     "tarefa_livros",
-    broker = "redis://redis:6379/0",
-    backend= "redis://redis:6379/0"
+    broker=REDIS_URL ,
+    backend=REDIS_URL
 )
-Celery_app.config.update(
-    task_track_started = True,
-    result_expires = 3600,
-    result_persistent = True,
-    task_serializer = "json",
-    result_serializer = "json",
-    aceppt_content = [ "json"]
+
+Celery_app.conf.update(
+    task_track_started=True,
+    result_expires=3600,
+    result_persistent=True,
+    task_serializer="json",
+    result_serializer="json",
+    accept_content=["json"],
+    timezone="UTC",
+    enable_utc=True,
 )

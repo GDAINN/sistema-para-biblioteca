@@ -1,54 +1,88 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
-from typing import Optional
 import secrets
-import os 
+import os
 import redis
 import json
 
+from task import fatorial, somar
 from sqlalchemy import create_engine, Column, Integer, String
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+
+# =========================
+# Banco de Dados
+# =========================
 
 database_url = os.getenv("database_url")
 
-engine = create_engine(database_url, connect_args= ({"check_same_thread": False}))
+engine = create_engine(
+    database_url,
+    connect_args={"check_same_thread": False}
+)
+
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=engine
 )
-redis_client = redis.Redis(host="redis", port=6379, db = 0, decode_responses=True )
-base = declarative_base()
+
+Base = declarative_base()
+
+# =========================
+# Redis
+# =========================
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = os.getenv("REDIS_PORT", "6379")
+redis_client = redis.Redis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    db=0,
+    decode_responses=True
+)
+
+# =========================
+# FastAPI
+# =========================
 
 app = FastAPI()
-#criando um login para o minha api 
+
+# =========================
+# Autenticação
+# =========================
+
 meu_usuario = os.getenv("meu_usuario")
 meu_senha = os.getenv("meu_senha")
 
 security = HTTPBasic()
 
-meu_dicionario = {}
+# =========================
+# Modelos
+# =========================
 
-class LivroDB(base):
+class LivroDB(Base):
     __tablename__ = "Livros"
+
     id = Column(Integer, primary_key=True, index=True)
     nome_livro = Column(String, index=True)
-    autor_livro = Column(String, index=True )
-    ano_livro =Column(Integer)
-    
+    autor_livro = Column(String, index=True)
+    ano_livro = Column(Integer)
+
+
 class Livro(BaseModel):
     nome_livro: str
     autor_livro: str
     ano_livro: int
-def salvar_livro_redis(livro_id: id, livro:Livro):
-    redis_client.set(f"Livro:{livro_id}",json.dumps(livro.dict()))
 
-def deletar_livro_redis(livro_id: int):
-    redis_client.delete(f"Livro:{livro_id}")
+# =========================
+# Criar tabelas
+# =========================
 
-base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
+
+# =========================
+# Sessão do banco
+# =========================
 
 def sessao_db():
     db = SessionLocal()
@@ -57,12 +91,72 @@ def sessao_db():
     finally:
         db.close()
 
-# Função para autenticar o usuário usando HTTP Basic Authentication
-def autenticar_meu_usuario(credentials: HTTPBasicCredentials = Depends(security)):
-    is_username_correct = secrets.compare_digest(credentials.username, meu_usuario)
-    is_password_correct= secrets.compare_digest(credentials.password, meu_senha)
-    if not (is_username_correct and is_password_correct):
-        raise HTTPException(status_code=401, detail="Credenciais inválidas.", headers={"WWW-Authenticate": "Basic"})
+# =========================
+# Redis
+# =========================
+
+def salvar_livro_redis(livro_id: int, livro: Livro):
+    redis_client.set(
+        f"Livro:{livro_id}",
+        json.dumps(livro.model_dump())
+    )
+
+
+def deletar_livro_redis(livro_id: int):
+    redis_client.delete(f"Livro:{livro_id}")
+
+# =========================
+# Login
+# =========================
+
+def autenticar_meu_usuario(
+    credentials: HTTPBasicCredentials = Depends(security)
+):
+    usuario_ok = secrets.compare_digest(
+        credentials.username,
+        meu_usuario
+    )
+
+    senha_ok = secrets.compare_digest(
+        credentials.password,
+        meu_senha
+    )
+
+    if not (usuario_ok and senha_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciais inválidas.",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+# =========================
+# Celery
+# =========================
+
+@app.post("/calcular/somar")
+def calcular_soma(a: int, b: int):
+
+    tarefa = somar.delay(a, b)
+
+    return {
+        "task_id": tarefa.id,
+        "mensagem": "Tarefa de soma enviada para execução."
+    }
+
+
+@app.post("/calcular/fatorial")
+def calcular_fatorial(n: int):
+
+    tarefa = fatorial.delay(n)
+
+    return {
+        "task_id": tarefa.id,
+        "mensagem": "Tarefa de fatorial enviada para execução."
+    }
+
+# =========================
+# Livros
+# =========================
 
 @app.get("/livros")
 def get_livros(
@@ -71,80 +165,117 @@ def get_livros(
     db: Session = Depends(sessao_db),
     credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)
 ):
-    livros = db.query(LivroDB).offset((page-1) * limit).all()
-    
-    # Validar paginação
+
     if page < 1 or limit < 1:
-        raise HTTPException(status_code=400, detail="Page e limit devem ser maiores que 0.")
+        raise HTTPException(
+            status_code=400,
+            detail="Page e limit devem ser maiores que zero."
+        )
 
-    if not livros:
-        return {"message": "Nenhum livro encontrado."}
+    livros = db.query(LivroDB)\
+        .offset((page - 1) * limit)\
+        .limit(limit)\
+        .all()
 
-    total_livros= db.query(LivroDB).count()
+    total = db.query(LivroDB).count()
 
     return {
         "page": page,
         "limit": limit,
-        "total_livros": total_livros,
-        "livros": [{"id": livro.id, "titulo": livro.nome_livro, "autor": livro.autor_livro, "ano": livro.ano_livro} for livro in livros]
+        "total_livros": total,
+        "livros": livros
     }
-    
+
 
 @app.post("/adicionar")
 def post_livros(
-    Livro: Livro,
+    livro: Livro,
     db: Session = Depends(sessao_db),
     credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)
 ):
-    
-    db_livro = db.query(LivroDB).filter(
-        LivroDB.nome_livro == Livro.nome_livro,
-        LivroDB.autor_livro == Livro.autor_livro
+
+    existe = db.query(LivroDB).filter(
+        LivroDB.nome_livro == livro.nome_livro,
+        LivroDB.autor_livro == livro.autor_livro
     ).first()
 
-    if db_livro:
+    if existe:
         raise HTTPException(
             status_code=400,
-            detail="Esse livro já existe dentro do banco de dados"
+            detail="Livro já cadastrado."
         )
 
-    novo_livro = LivroDB(
-        nome_livro=Livro.nome_livro,
-        autor_livro=Livro.autor_livro,
-        ano_livro=Livro.ano_livro
+    novo = LivroDB(
+        nome_livro=livro.nome_livro,
+        autor_livro=livro.autor_livro,
+        ano_livro=livro.ano_livro
     )
 
-    db.add(novo_livro)
+    db.add(novo)
     db.commit()
-    db.refresh(novo_livro)
-    salvar_livro_redis(novo_livro.id, livro)
-    return {"message": "Livro adicionado com sucesso."}
+    db.refresh(novo)
+
+    salvar_livro_redis(novo.id, livro)
+
+    return {
+        "message": "Livro adicionado com sucesso."
+    }
 
 
-    
 @app.put("/atualizar/{id}")
-def put_livros(id: int, Livro: Livro, db: Session = Depends(sessao_db), credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)):
-    db_livro = db.query(LivroDB).filter(LivroDB.id == id).first()
+def atualizar_livro(
+    id: int,
+    livro: Livro,
+    db: Session = Depends(sessao_db),
+    credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)
+):
+
+    db_livro = db.query(LivroDB).filter(
+        LivroDB.id == id
+    ).first()
+
     if not db_livro:
-        raise HTTPException(status_code=404, detail="Livro não foi encontrado no banco de dados!.")
-    db_livro.nome_livro = Livro.nome_livro
-    db_livro.autor_livro = Livro.autor_livro
-    db_livro.ano_livro = Livro.ano_livro
+        raise HTTPException(
+            status_code=404,
+            detail="Livro não encontrado."
+        )
+
+    db_livro.nome_livro = livro.nome_livro
+    db_livro.autor_livro = livro.autor_livro
+    db_livro.ano_livro = livro.ano_livro
 
     db.commit()
     db.refresh(db_livro)
 
-    return {"message": "Livro atualizado com sucesso."}
+    salvar_livro_redis(id, livro)
+
+    return {
+        "message": "Livro atualizado com sucesso."
+    }
 
 
 @app.delete("/deletar/{id}")
-def delete_livros(id: int, db: Session = Depends(sessao_db), credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)):
-    db_livro = db.query(LivroDB).filter(LivroDB.id == id).first()
+def deletar_livro(
+    id: int,
+    db: Session = Depends(sessao_db),
+    credentials: HTTPBasicCredentials = Depends(autenticar_meu_usuario)
+):
+
+    db_livro = db.query(LivroDB).filter(
+        LivroDB.id == id
+    ).first()
 
     if not db_livro:
-        raise HTTPException(status_code=404, detail="Livro não encontrado no banco de dados!.")
-    
+        raise HTTPException(
+            status_code=404,
+            detail="Livro não encontrado."
+        )
+
     db.delete(db_livro)
     db.commit()
+
     deletar_livro_redis(id)
-    return {"message": "Livro deletado com sucesso."}
+
+    return {
+        "message": "Livro deletado com sucesso."
+    }
